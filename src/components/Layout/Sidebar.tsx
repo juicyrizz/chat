@@ -1,10 +1,13 @@
 import React from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Home, Users, MessageSquare, Camera, Bookmark, Settings } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 import { motion } from 'framer-motion';
 
 const Sidebar: React.FC = () => {
   const { theme } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const themeClasses = {
     light: 'bg-white border-gray-200 text-gray-900',
@@ -14,13 +17,17 @@ const Sidebar: React.FC = () => {
   };
 
   const menuItems = [
-    { icon: Home, label: 'Home', active: true },
-    { icon: Users, label: 'Friends', active: false },
-    { icon: MessageSquare, label: 'Messages', active: false },
-    { icon: Camera, label: 'Stories', active: false },
-    { icon: Bookmark, label: 'Saved', active: false },
-    { icon: Settings, label: 'Settings', active: false },
+    { icon: Home, label: 'Home', path: '/', active: location.pathname === '/' },
+    { icon: Users, label: 'Friends', path: '/friends', active: location.pathname === '/friends' },
+    { icon: MessageSquare, label: 'Messages', path: '/chat', active: location.pathname === '/chat' },
+    { icon: Camera, label: 'Stories', path: '/stories', active: location.pathname === '/stories' },
+    { icon: Bookmark, label: 'Saved', path: '/saved', active: location.pathname === '/saved' },
+    { icon: Settings, label: 'Settings', path: '/settings', active: location.pathname === '/settings' },
   ];
+
+  const handleNavigation = (path: string) => {
+    navigate(path);
+  };
 
   return (
     <motion.aside 
@@ -36,10 +43,11 @@ const Sidebar: React.FC = () => {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.1 }}
+              onClick={() => handleNavigation(item.path)}
               className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                 item.active
                   ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg'
-                  : 'hover:bg-opacity-80 hover:bg-gray-100'
+                  : 'hover:bg-opacity-80 hover:bg-gray-100 cursor-pointer'
               }`}
             >
               <item.icon className="w-5 h-5" />
