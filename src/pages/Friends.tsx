@@ -1,61 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Users, Clock, Check, X } from 'lucide-react';
+import { UserPlus, Users, Clock, Check, X, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Layout from '../components/Layout/Layout';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
+import { friendsService, profileService } from '../services/api';
+import { useRealtime } from '../hooks/useRealtime';
 
 const Friends: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'friends' | 'requests' | 'suggestions'>('friends');
-  const [friends, setFriends] = useState([
-    {
-      id: '1',
-      username: 'alice_adventures',
-      full_name: 'Alice Johnson',
-      avatar_url: null,
-      status: 'accepted',
-      mutual_friends: 5,
-      online: true
-    },
-    {
-      id: '2',
-      username: 'bob_creates',
-      full_name: 'Bob Smith',
-      avatar_url: null,
-      status: 'accepted',
-      mutual_friends: 3,
-      online: false
-    }
-  ]);
-
-  const [friendRequests, setFriendRequests] = useState([
-    {
-      id: '3',
-      username: 'carol_reads',
-      full_name: 'Carol Davis',
-      avatar_url: null,
-      status: 'pending',
-      mutual_friends: 2
-    }
-  ]);
-
-  const [suggestions, setSuggestions] = useState([
-    {
-      id: '4',
-      username: 'david_codes',
-      full_name: 'David Wilson',
-      avatar_url: null,
-      mutual_friends: 4
-    },
-    {
-      id: '5',
-      username: 'emma_designs',
-      full_name: 'Emma Brown',
-      avatar_url: null,
-      mutual_friends: 1
-    }
-  ]);
-
+  const [friends, setFriends] = useState<any[]>([]);
+  const [friendRequests, setFriendRequests] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const { theme } = useTheme();
   const { user } = useAuth();
 
@@ -66,20 +23,73 @@ const Friends: React.FC = () => {
     chroma: 'bg-gray-900/40 border-gray-800/30 text-gray-100 backdrop-blur-xl'
   };
 
-  const handleAcceptRequest = (requestId: string) => {
-    const request = friendRequests.find(req => req.id === requestId);
-    if (request) {
-      setFriends([...friends, { ...request, status: 'accepted', online: false }]);
-      setFriendRequests(friendRequests.filter(req => req.id !== requestId));
+  const fetchData = async () => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      
+      // Fetch friends
+      const friendsData = await friendsService.getFriends(user.id);
+      setFriends(friendsData);
+
+      // Fetch friend requests
+      const requestsData = await friendsService.getFriendRequests(user.id);
+      setFriendRequests(requestsData);
+
+      // Fetch suggestions (random users not already friends)
+      const allUsers = await profileService.searchUsers('');
+      const friendIds = friendsData.map((f: any) => f.friend.id);
+      const requestIds = requestsData.map((r: any) => r.user.id);
+      const suggestionsData = allUsers
+        .filter((u: any) => u.id !== user.id && !friendIds.includes(u.id) && !requestIds.includes(u.id))
+        .slice(0, 10);
+      setSuggestions(suggestionsData);
+    } catch (error) {
+      console.error('Error fetching friends data:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleRejectRequest = (requestId: string) => {
-    setFriendRequests(friendRequests.filter(req => req.id !== requestId));
+  useEffect(() => {
+    fetchData();
+  }, [user]);
+
+  // Real-time updates for friendships
+  useRealtime('friendships', (payload) => {
+    if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+      fetchData();
+    }
+  });
+
+  const handleAcceptRequest = async (requestId: string) => {
+    try {
+      await friendsService.acceptFriendRequest(requestId);
+      fetchData();
+    } catch (error) {
+      console.error('Error accepting friend request:', error);
+    }
   };
 
-  const handleSendRequest = (userId: string) => {
-    setSuggestions(suggestions.filter(user => user.id !== userId));
+  const handleRejectRequest = async (requestId: string) => {
+    try {
+      await friendsService.rejectFriendRequest(requestId);
+      fetchData();
+    } catch (error) {
+      console.error('Error rejecting friend request:', error);
+    }
+  };
+
+  const handleSendRequest = async (userId: string) => {
+    if (!user) return;
+    
+    try {
+      await friendsService.sendFriendRequest(user.id, userId);
+      setSuggestions(prev => prev.filter(u => u.id !== userId));
+    } catch (error) {
+      console.error('Error sending friend request:', error);
+    }
   };
 
   const tabs = [
@@ -87,6 +97,18 @@ const Friends: React.FC = () => {
     { id: 'requests', label: 'Requests', icon: Clock, count: friendRequests.length },
     { id: 'suggestions', label: 'Suggestions', icon: UserPlus, count: suggestions.length }
   ];
+
+  if (loading) {
+    return (
+      <Layout>
+        <div className="max-w-4xl mx-auto p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -125,110 +147,147 @@ const Friends: React.FC = () => {
           <div className="space-y-4">
             {activeTab === 'friends' && (
               <>
-                {friends.map((friend, index) => (
-                  <motion.div
-                    key={friend.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center space-x-4">
-                      <div className="relative">
+                {friends.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-500 mb-2">No friends yet</h3>
+                    <p className="text-gray-400">Start connecting with people!</p>
+                  </div>
+                ) : (
+                  friends.map((friendship, index) => (
+                    <motion.div
+                      key={friendship.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center space-x-4">
                         <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
                           <span className="text-white font-medium">
-                            {friend.full_name.charAt(0)}
+                            {friendship.friend.full_name.charAt(0)}
                           </span>
                         </div>
-                        {friend.online && (
-                          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
-                        )}
+                        <div>
+                          <h3 className="font-semibold">{friendship.friend.full_name}</h3>
+                          <p className="text-sm text-gray-500">@{friendship.friend.username}</p>
+                          {friendship.friend.bio && (
+                            <p className="text-xs text-gray-400 mt-1">{friendship.friend.bio}</p>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-semibold">{friend.full_name}</h3>
-                        <p className="text-sm text-gray-500">@{friend.username}</p>
-                        <p className="text-xs text-gray-400">{friend.mutual_friends} mutual friends</p>
-                      </div>
-                    </div>
-                    <button className="px-4 py-2 text-purple-600 hover:text-purple-800 transition-colors">
-                      Message
-                    </button>
-                  </motion.div>
-                ))}
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="flex items-center space-x-2 px-4 py-2 text-purple-600 hover:text-purple-800 transition-colors"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        <span>Message</span>
+                      </motion.button>
+                    </motion.div>
+                  ))
+                )}
               </>
             )}
 
             {activeTab === 'requests' && (
               <>
-                {friendRequests.map((request, index) => (
-                  <motion.div
-                    key={request.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-                        <span className="text-white font-medium">
-                          {request.full_name.charAt(0)}
-                        </span>
+                {friendRequests.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-500 mb-2">No friend requests</h3>
+                    <p className="text-gray-400">You're all caught up!</p>
+                  </div>
+                ) : (
+                  friendRequests.map((request, index) => (
+                    <motion.div
+                      key={request.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                          <span className="text-white font-medium">
+                            {request.user.full_name.charAt(0)}
+                          </span>
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{request.user.full_name}</h3>
+                          <p className="text-sm text-gray-500">@{request.user.username}</p>
+                          {request.user.bio && (
+                            <p className="text-xs text-gray-400 mt-1">{request.user.bio}</p>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-semibold">{request.full_name}</h3>
-                        <p className="text-sm text-gray-500">@{request.username}</p>
-                        <p className="text-xs text-gray-400">{request.mutual_friends} mutual friends</p>
+                      <div className="flex space-x-2">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleAcceptRequest(request.id)}
+                          className="p-2 bg-green-500 text-white rounded-full hover:bg-green-600 transition-colors"
+                        >
+                          <Check className="w-4 h-4" />
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleRejectRequest(request.id)}
+                          className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </motion.button>
                       </div>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handleAcceptRequest(request.id)}
-                        className="p-2 bg-green-500 text-white rounded-full hover:bg-green-600 transition-colors"
-                      >
-                        <Check className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleRejectRequest(request.id)}
-                        className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  ))
+                )}
               </>
             )}
 
             {activeTab === 'suggestions' && (
               <>
-                {suggestions.map((suggestion, index) => (
-                  <motion.div
-                    key={suggestion.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
-                        <span className="text-white font-medium">
-                          {suggestion.full_name.charAt(0)}
-                        </span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold">{suggestion.full_name}</h3>
-                        <p className="text-sm text-gray-500">@{suggestion.username}</p>
-                        <p className="text-xs text-gray-400">{suggestion.mutual_friends} mutual friends</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleSendRequest(suggestion.id)}
-                      className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200"
+                {suggestions.length === 0 ? (
+                  <div className="text-center py-12">
+                    <UserPlus className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-500 mb-2">No suggestions</h3>
+                    <p className="text-gray-400">Check back later for new people to connect with!</p>
+                  </div>
+                ) : (
+                  suggestions.map((suggestion, index) => (
+                    <motion.div
+                      key={suggestion.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center justify-between p-4 rounded-xl hover:bg-gray-50 transition-colors"
                     >
-                      Add Friend
-                    </button>
-                  </motion.div>
-                ))}
+                      <div className="flex items-center space-x-4">
+                        <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                          <span className="text-white font-medium">
+                            {suggestion.full_name.charAt(0)}
+                          </span>
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{suggestion.full_name}</h3>
+                          <p className="text-sm text-gray-500">@{suggestion.username}</p>
+                          {suggestion.bio && (
+                            <p className="text-xs text-gray-400 mt-1">{suggestion.bio}</p>
+                          )}
+                        </div>
+                      </div>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleSendRequest(suggestion.id)}
+                        className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all duration-200"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span>Add Friend</span>
+                      </motion.button>
+                    </motion.div>
+                  ))
+                )}
               </>
             )}
           </div>
